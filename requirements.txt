@@ -18,6 +18,7 @@ ultralytics>=8.3.0  # YOLOv8
 numpy>=1.26.0
 pandas>=2.2.0
 scipy>=1.13.0
+lap>=0.5.12  # YOLOv8トラッキング用
 
 # 時系列解析・フィルタリング
 filterpy>=1.4.5  # Kalman Filter

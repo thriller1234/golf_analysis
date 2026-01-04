@@ -135,7 +135,11 @@ comparison = analyzer.compare_swings(
   - [x] スイング軌道の可視化
   - [x] 特徴量の抽出と比較（肩・腰の回転角、Xファクター、手首軌道）
   - [x] サイドバイサイド比較可視化
-- [ ] STEP 5: UIの実装
+- [x] STEP 5: UIの実装（Streamlit実装完了）
+  - [x] WebベースのUI
+  - [x] 動画アップロード機能
+  - [x] 解析結果の可視化
+  - [x] 比較機能のUI
 
 ## 注意事項
 
