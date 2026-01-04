@@ -1,0 +1,43 @@
+# ゴルフスイング解析アプリ - 依存関係
+# Python 3.13.3, CUDA 12.8対応
+
+# 深層学習フレームワーク（CUDA 12.8対応）
+torch>=2.5.0
+torchvision>=0.20.0
+torchaudio>=2.5.0
+
+# 姿勢推定
+mediapipe>=0.10.0
+opencv-python>=4.9.0
+opencv-contrib-python>=4.9.0
+
+# 物体検出（クラブ検出用）
+ultralytics>=8.3.0  # YOLOv8
+
+# 数値計算・データ処理
+numpy>=1.26.0
+pandas>=2.2.0
+scipy>=1.13.0
+
+# 時系列解析・フィルタリング
+filterpy>=1.4.5  # Kalman Filter
+
+# 可視化
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# UI（オプション）
+streamlit>=1.32.0
+pyqt6>=6.6.0
+
+# その他
+tqdm>=4.66.0
+pillow>=10.2.0
+scikit-learn>=1.4.0
+
+# 開発用
+pytest>=8.0.0
+black>=24.0.0
+flake8>=7.0.0
+
