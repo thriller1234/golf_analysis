@@ -15,19 +15,29 @@ except ImportError:
     YOLO_AVAILABLE = False
     print("警告: ultralyticsがインストールされていません。YOLOv8機能は使用できません。")
 
+# エッジ検出機能をインポート
+from .club_detector_enhanced import EnhancedClubDetector
+
 
 class ClubDetector:
     """YOLOv8を使用したゴルフクラブ検出クラス"""
     
-    def __init__(self, model_path: Optional[str] = None, use_yolo: bool = True):
+    def __init__(
+        self, 
+        model_path: Optional[str] = None, 
+        use_yolo: bool = True,
+        use_edge_detection: bool = True
+    ):
         """
         初期化
         
         Args:
             model_path: カスタムモデルのパス（Noneの場合はデフォルトモデル）
             use_yolo: YOLOv8を使用するか（Falseの場合は簡易検出を使用）
+            use_edge_detection: エッジ検出を使用するか（YOLOv8が使えない場合や補助として）
         """
         self.use_yolo = use_yolo and YOLO_AVAILABLE
+        self.use_edge_detection = use_edge_detection
         
         if self.use_yolo:
             if model_path and Path(model_path).exists():
@@ -44,22 +54,36 @@ class ClubDetector:
         else:
             self.model = None
             print("簡易検出モードを使用します（手首位置ベース）。")
+        
+        # エッジ検出機能を初期化
+        if self.use_edge_detection:
+            self.enhanced_detector = EnhancedClubDetector()
+        else:
+            self.enhanced_detector = None
     
-    def detect_club(self, frame: np.ndarray, wrist_position: Optional[Tuple[float, float]] = None) -> List[Dict]:
+    def detect_club(
+        self, 
+        frame: np.ndarray, 
+        wrist_position: Optional[Tuple[float, float]] = None,
+        combine_methods: bool = True
+    ) -> List[Dict]:
         """
         1フレームからクラブを検出
         
         Args:
             frame: 入力フレーム
-            wrist_position: 手首の位置（簡易検出モードで使用）
+            wrist_position: 手首の位置（簡易検出モードやエッジ検出で使用）
+            combine_methods: YOLOv8とエッジ検出を組み合わせるか
             
         Returns:
             検出されたクラブ情報のリスト
         """
+        detections = []
+        
+        # 1. YOLOv8による検出
         if self.use_yolo and self.model:
             results = self.model(frame, verbose=False)
             
-            detections = []
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
@@ -74,37 +98,66 @@ class ClubDetector:
                         'bbox': [x1, y1, x2, y2],
                         'confidence': confidence,
                         'class_id': cls_id,
-                        'center': [(x1 + x2) / 2, (y1 + y2) / 2]
+                        'center': [(x1 + x2) / 2, (y1 + y2) / 2],
+                        'method': 'yolo',
+                        'frame_number': None  # 後で設定される
                     })
+        
+        # 2. エッジ検出による補助検出（YOLOv8が使えない場合、または組み合わせる場合）
+        if (not self.use_yolo or combine_methods) and self.use_edge_detection and wrist_position:
+            edge_detections = self.enhanced_detector.detect_club_edges(frame, wrist_position)
             
-            return detections
-        else:
-            # 簡易検出モード（手首位置ベース）
-            if wrist_position:
-                h, w = frame.shape[:2]
-                wrist_x = int(wrist_position[0] * w)
-                wrist_y = int(wrist_position[1] * h)
+            for edge in edge_detections:
+                line = edge['line']
+                x1, y1, x2, y2 = line
                 
-                # 手首位置を中心とした簡易的なバウンディングボックス
-                bbox_size = 50
-                x1 = max(0, wrist_x - bbox_size)
-                y1 = max(0, wrist_y - bbox_size)
-                x2 = min(w, wrist_x + bbox_size)
-                y2 = min(h, wrist_y + bbox_size)
+                # バウンディングボックスを作成
+                bbox = [
+                    min(x1, x2),
+                    min(y1, y2),
+                    max(x1, x2),
+                    max(y1, y2)
+                ]
                 
-                return [{
-                    'bbox': [x1, y1, x2, y2],
-                    'confidence': 0.5,  # 簡易検出なので信頼度は低め
+                detections.append({
+                    'bbox': bbox,
+                    'confidence': 0.6,  # エッジ検出なので信頼度は中程度
                     'class_id': -1,  # クラスIDなし
-                    'center': [wrist_x, wrist_y]
-                }]
+                    'center': edge['center'],
+                    'method': 'edge',
+                    'line': line,
+                    'length': edge['length'],
+                    'angle': edge['angle']
+                })
+        
+        # 3. 簡易検出モード（フォールバック）
+        if not detections and wrist_position:
+            h, w = frame.shape[:2]
+            wrist_x = int(wrist_position[0] * w)
+            wrist_y = int(wrist_position[1] * h)
             
-            return []
+            # 手首位置を中心とした簡易的なバウンディングボックス
+            bbox_size = 50
+            x1 = max(0, wrist_x - bbox_size)
+            y1 = max(0, wrist_y - bbox_size)
+            x2 = min(w, wrist_x + bbox_size)
+            y2 = min(h, wrist_y + bbox_size)
+            
+            detections.append({
+                'bbox': [x1, y1, x2, y2],
+                'confidence': 0.5,  # 簡易検出なので信頼度は低め
+                'class_id': -1,  # クラスIDなし
+                'center': [wrist_x, wrist_y],
+                'method': 'wrist_based'
+            })
+        
+        return detections
     
     def detect_club_in_video(
         self, 
         video_path: str | Path,
-        keypoints: Optional[List[Dict]] = None
+        keypoints: Optional[List[Dict]] = None,
+        combine_methods: bool = True
     ) -> List[Dict]:
         """
         動画全体からクラブを検出・トラッキング
@@ -149,9 +202,10 @@ class ClubDetector:
                             'bbox': [x1, y1, x2, y2],
                             'confidence': confidence,
                             'class_id': cls_id,
-                            'track_id': track_id,
-                            'center': [(x1 + x2) / 2, (y1 + y2) / 2]
-                        })
+                        'track_id': track_id,
+                        'center': [(x1 + x2) / 2, (y1 + y2) / 2],
+                        'method': 'yolo'
+                    })
                 
                 detections_list.append({
                     'frame_number': frame_idx,
@@ -164,17 +218,27 @@ class ClubDetector:
             if keypoints is None:
                 raise ValueError("簡易検出モードではkeypointsが必要です")
             
+            # 動画を読み込んでフレームごとに処理
+            cap = cv2.VideoCapture(str(video_path))
             detections_list = []
             RIGHT_WRIST = 16
+            frame_idx = 0
             
-            for frame_idx, kp in enumerate(keypoints):
-                landmarks = kp.get('landmarks', {})
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                if frame_idx >= len(keypoints):
+                    break
+                
+                landmarks = keypoints[frame_idx].get('landmarks', {})
                 wrist = landmarks.get(RIGHT_WRIST)
                 
                 frame_detections = []
                 if wrist:
                     wrist_pos = (wrist['x'], wrist['y'])
-                    detections = self.detect_club(None, wrist_position=wrist_pos)
+                    detections = self.detect_club(frame, wrist_position=wrist_pos, combine_methods=combine_methods)
                     for det in detections:
                         det['frame_number'] = frame_idx
                         frame_detections.append(det)
@@ -183,7 +247,9 @@ class ClubDetector:
                     'frame_number': frame_idx,
                     'detections': frame_detections
                 })
+                frame_idx += 1
             
+            cap.release()
             return detections_list
     
     def extract_club_trajectory(self, detections_list: List[Dict]) -> Dict:
