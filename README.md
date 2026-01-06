@@ -60,55 +60,61 @@ python -m pytest tests/
 
 ```
 golf_analysis/
-├── src/                    # ソースコード
-│   ├── pose_estimation/   # 骨格推定モジュール
-│   ├── club_detection/    # クラブ検出モジュール
-│   ├── swing_analysis/    # スイング解析モジュール
-│   ├── visualization/     # 可視化モジュール
-│   └── utils/             # ユーティリティ
-├── data/                  # データディレクトリ
-│   ├── videos/            # 動画ファイル
-│   └── models/            # 学習済みモデル
-├── tests/                 # テストコード
-├── docs/                  # ドキュメント
-│   └── howtodo.md         # 開発ガイド
-├── requirements.txt       # 依存関係
-└── README.md             # このファイル
+├── app.py                 # Streamlit UI（メイン実行ファイル）
+├── main.py                # コマンドライン実行スクリプト
+├── src/                   # ソースコード
+│   ├── pose_estimation/  # 骨格推定モジュール
+│   ├── club_detection/   # クラブ検出モジュール
+│   ├── swing_analysis/   # スイング解析モジュール
+│   └── visualization/    # 可視化モジュール
+├── data/                 # データディレクトリ
+│   ├── videos/           # 動画ファイル
+│   └── models/           # 学習済みモデル
+├── output/               # 出力ディレクトリ（実行時に生成）
+├── scripts/              # スクリプト
+│   └── train_yolov8_club.py  # YOLOv8学習スクリプト（後日使用）
+├── docs/                 # ドキュメント
+│   ├── execution_guide.md     # 実行ガイド
+│   ├── usage_guide.md         # 使い方ガイド
+│   ├── troubleshooting.md     # トラブルシューティング
+│   ├── yolov8_custom_model_guide.md  # カスタムモデル学習ガイド
+│   └── howtodo.md        # 開発ガイド
+├── run_streamlit.ps1     # Streamlit起動スクリプト
+├── run_cli.ps1          # CLI実行スクリプト
+├── stop_streamlit.ps1   # Streamlit停止スクリプト
+├── requirements.txt      # 依存関係
+├── setup.py             # パッケージ設定
+└── README.md            # このファイル
 ```
 
 ## 使用方法
 
-### STEP 1: 姿勢推定による骨格抽出
+### 方法1: Streamlit UI（推奨）
 
-```python
-from src.pose_estimation import PoseEstimator
+```powershell
+# スクリプトを使用
+.\run_streamlit.ps1
 
-estimator = PoseEstimator()
-keypoints = estimator.process_video("data/videos/my_swing.mp4")
+# または直接実行
+streamlit run app.py
 ```
 
-### STEP 2: クラブ検出
+ブラウザで `http://localhost:8501` にアクセスします。
 
-```python
-from src.club_detection import ClubDetector
+### 方法2: コマンドライン（CLI）
 
-detector = ClubDetector()
-club_trajectory = detector.detect_club("data/videos/my_swing.mp4")
+```powershell
+# 基本的な使用
+python main.py data\videos\my_swing.mp4
+
+# プロ選手と比較
+python main.py data\videos\my_swing.mp4 --pro-video data\videos\matsuyama_iron_1.mp4
+
+# スクリプトを使用
+.\run_cli.ps1 -Video "data\videos\my_swing.mp4" -ProVideo "data\videos\matsuyama_iron_1.mp4"
 ```
 
-### STEP 3: スイング解析と比較
-
-```python
-from src.swing_analysis import SwingAnalyzer
-
-analyzer = SwingAnalyzer()
-comparison = analyzer.compare_swings(
-    my_swing="data/videos/my_swing.mp4",
-    pro_swing="data/videos/pro_swing.mp4"
-)
-```
-
-詳細な使用方法は `docs/howtodo.md` を参照してください。
+詳細な使用方法は `docs/execution_guide.md` を参照してください。
 
 ## 開発ロードマップ
 
