@@ -168,17 +168,8 @@ python main.py data\videos\my_swing.mp4 --pro-video data\videos\matsuyama_iron_1
 
 ## ライセンス
 
-[ライセンス情報を追加]
-
-## 参考資料
-
-詳細な技術情報は `docs/howtodo.md` を参照してください。
+このプロジェクトはMITライセンスの下で提供されています。詳細は[LICENSE](./LICENSE)ファイルをご覧ください。
 
 ## 貢献
 
 プルリクエストやイシューの報告を歓迎します。
-
-## 連絡先
-
-[連絡先情報を追加]
-
