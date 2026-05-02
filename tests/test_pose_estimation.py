@@ -12,7 +12,7 @@ def test_pose_estimator_initialization():
     """PoseEstimatorの初期化テスト"""
     estimator = PoseEstimator()
     assert estimator is not None
-    assert estimator.pose is not None
+    assert hasattr(estimator, "detector") and estimator.detector is not None
 
 
 def test_process_frame():

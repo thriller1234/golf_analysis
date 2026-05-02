@@ -1,23 +1,19 @@
 # ゴルフスイング解析アプリ
 
-後方から撮影した1つのカメラ動画を使用して、自分のスイングとプロ選手のスイングを比較解析するアプリケーションです。
+後方から撮影したスイング動画に **MediaPipe Pose（heavy）** の骨格オーバーレイを付与し、`output` に mp4 として書き出すツールです。比較指定時は左右横並びの1ファイルを出力します。
 
 ## プロジェクト概要
 
-このプロジェクトは、AI技術を活用してゴルフスイングを定量的に解析し、プロ選手との比較を行うことで、スイング改善を支援します。
-
 ### 主な機能
 
-- **骨格推定**: MediaPipe/OpenPoseを使用した人体骨格の検出
-- **クラブ検出**: YOLOv8を使用したゴルフクラブの検出とトラッキング
-- **スイング位相検出**: アドレス、トップ、インパクト、フィニッシュの自動検出
-- **比較解析**: プロ選手とのスイング比較と差分可視化
-- **可視化**: スイング軌道、角度、タイミングの可視化
+- **骨格推定**: MediaPipe **Pose Landmarker heavy** + 動画用 `detect_for_video`（TFLite **GPU デリゲート**を優先、不可なら CPU）
+- **出力**: 入力動画に骨格を重ねた mp4 を `output/` に保存。`--proswing` 指定時は myswing / proswing を横並びにした1本の mp4
+- **クラブ位置**: 現状は未実装（将来 YOLOv8 等を検証する場合は `src/club_detection/` を参照）
 
 ## 環境要件
 
 - **OS**: Windows 11
-- **GPU**: GeForce RTX 5090 Laptop 16GB
+- **GPU**: GeForce RTX 4090 Laptop 16GB（MediaPipe は TensorFlow Lite GPU デリゲート利用可。環境により CPU フォールバック）
 - **CUDA**: 12.8
 - **Python**: 3.13.3
 
@@ -60,92 +56,40 @@ python -m pytest tests/
 
 ```
 golf_analysis/
-├── app.py                 # Streamlit UI（メイン実行ファイル）
-├── main.py                # コマンドライン実行スクリプト
-├── src/                   # ソースコード
-│   ├── pose_estimation/  # 骨格推定モジュール
-│   ├── club_detection/   # クラブ検出モジュール
-│   ├── swing_analysis/   # スイング解析モジュール
-│   └── visualization/    # 可視化モジュール
-├── data/                 # データディレクトリ
-│   ├── videos/           # 動画ファイル
-│   └── models/           # 学習済みモデル
-├── output/               # 出力ディレクトリ（実行時に生成）
-├── scripts/              # スクリプト
-│   └── train_yolov8_club.py  # YOLOv8学習スクリプト（後日使用）
-├── docs/                 # ドキュメント
-│   ├── execution_guide.md     # 実行ガイド
-│   ├── usage_guide.md         # 使い方ガイド
-│   ├── troubleshooting.md     # トラブルシューティング
-│   ├── yolov8_custom_model_guide.md  # カスタムモデル学習ガイド
-│   └── howtodo.md        # 開発ガイド
-├── run_streamlit.ps1     # Streamlit起動スクリプト
-├── run_cli.ps1          # CLI実行スクリプト
-├── stop_streamlit.ps1   # Streamlit停止スクリプト
-├── requirements.txt      # 依存関係
-├── setup.py             # パッケージ設定
-└── README.md            # このファイル
+├── scripts/
+│   └── main.py            # CLI（骨格オーバーレイ動画の生成）
+├── src/
+│   ├── pose_estimation/   # MediaPipe Pose Landmarker
+│   ├── video_render.py    # オーバーレイ・横並び書き出し
+│   ├── club_detection/    # クラブ検出モジュール（現状 main パイプライン未接続）
+│   └── visualization/     # 骨格の OpenCV 描画
+├── data/
+│   ├── videos/
+│   └── models/            # pose_landmarker_heavy.task（初回自動ダウンロード）
+├── output/                # 生成 mp4
+├── docs/
+├── requirements.txt
+└── README.md
 ```
 
 ## 使用方法
 
-### 方法1: Streamlit UI（推奨）
+パスは **プロジェクトルートからの相対パス**、または **絶対パス**で指定します。
 
 ```powershell
-# スクリプトを使用
-.\run_streamlit.ps1
+# プロジェクトルートで実行（1本の動画 → output\<名前>_pose_overlay.mp4）
+python scripts/main.py --myswing data/videos/my_swing.mp4
 
-# または直接実行
-streamlit run app.py
+# 横並び比較 → output/compare_<左>_vs_<右>.mp4
+python scripts/main.py --myswing data/videos/my_swing.mp4 --proswing data/videos/matsuyama_driver_1.mp4
 ```
 
-ブラウザで `http://localhost:8501` にアクセスします。
+初回実行時、`data/models/pose_landmarker_heavy.task` が無ければ自動ダウンロードします。
 
-### 方法2: コマンドライン（CLI）
+## 開発メモ（現状の焦点）
 
-```powershell
-# 基本的な使用
-python main.py data\videos\my_swing.mp4
-
-# プロ選手と比較
-python main.py data\videos\my_swing.mp4 --pro-video data\videos\matsuyama_iron_1.mp4
-
-# スクリプトを使用
-.\run_cli.ps1 -Video "data\videos\my_swing.mp4" -ProVideo "data\videos\matsuyama_iron_1.mp4"
-```
-
-詳細な使用方法は `docs/execution_guide.md` を参照してください。
-
-## 開発ロードマップ
-
-- [x] プロジェクト構造の作成
-- [x] STEP 1: 姿勢推定による骨格抽出（完了）
-  - [x] MediaPipe 0.10対応
-  - [x] 動画からの骨格情報抽出
-  - [x] 主要関節の座標取得
-  - [x] 骨格情報の可視化（動画への描画）
-- [x] STEP 2: クラブ検出モデル作成（基本実装完了）
-  - [x] クラス構造の作成
-  - [x] YOLOv8によるクラブ検出の実装（基本機能）
-  - [x] クラブ軌道の抽出（基本実装）
-  - [x] 手首位置ベースの簡易検出（フォールバック）
-  - [x] エッジ検出との組み合わせ（統合完了）
-  - [ ] カスタムモデルの学習（ゴルフクラブ専用）- 学習スクリプト準備済み
-- [x] STEP 3: スイング位相の自動検出と正規化（完了）
-  - [x] クラス構造の作成
-  - [x] アドレス、トップ、インパクト、フィニッシュの自動検出
-  - [x] 空間・時間の正規化実装（肩幅・腰幅ベースの空間正規化、位相ベースの時間正規化）
-- [x] STEP 4: 比較解析と可視化（完了）
-  - [x] クラス構造の作成
-  - [x] プロ選手との比較機能
-  - [x] スイング軌道の可視化
-  - [x] 特徴量の抽出と比較（肩・腰の回転角、Xファクター、手首軌道）
-  - [x] サイドバイサイド比較可視化
-- [x] STEP 5: UIの実装（Streamlit実装完了）
-  - [x] WebベースのUI
-  - [x] 動画アップロード機能
-  - [x] 解析結果の可視化
-  - [x] 比較機能のUI
+- MediaPipe Pose heavy + 動画オーバーレイ出力（`scripts/main.py`）
+- クラブを動画に重ねる場合は `src/club_detection/` と `scripts/train_yolov8_club.py` をパイプラインに接続する必要あり（未接続）
 
 ## 注意事項
 

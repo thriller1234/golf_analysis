@@ -21,14 +21,10 @@ setup(
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
-        # requirements.txtから主要な依存関係を記載
         "opencv-python>=4.9.0",
         "mediapipe>=0.10.0",
         "numpy>=1.26.0",
-        "pandas>=2.2.0",
-        "matplotlib>=3.8.0",
         "ultralytics>=8.3.0",
-        "filterpy>=1.4.5",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
