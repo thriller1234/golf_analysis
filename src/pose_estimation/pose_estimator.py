@@ -53,11 +53,14 @@ class PoseEstimator:
         *,
         use_gpu: bool = True,
         model_path: Optional[Path] = None,
+        offline_only: bool = True,
     ):
         """
         Args:
             use_gpu: True のとき GPU デリゲートを試み、失敗時は CPU にフォールバック
             model_path: .task ファイル（未指定時は heavy を data/models に配置）
+            offline_only: True のときファイルが無ければダウンロードしない（FileNotFoundError）。
+                False のときのみ Google から heavy を取得する。
         """
         if not USE_NEW_API:
             raise RuntimeError("MediaPipe Tasks API が必要です")
@@ -65,6 +68,12 @@ class PoseEstimator:
         root = Path(__file__).resolve().parent.parent.parent
         self._model_path = model_path or (root / _DEFAULT_MODEL_REL)
         if not self._model_path.exists():
+            if offline_only:
+                raise FileNotFoundError(
+                    f"Pose Landmarker の .task がありません（オフラインモード）: {self._model_path}\n"
+                    "  data/models に pose_landmarker_heavy.task を置くか、"
+                    " --no-off-line-only で自動ダウンロードを許可してください。"
+                )
             self._download_model(self._model_path, _POSE_MODEL_HEAVY_URL)
 
         path_str = str(self._model_path)

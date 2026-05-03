@@ -1,0 +1,1 @@
+# Keeps output/videos/ in Git; rendered *.mp4 outputs are gitignored.

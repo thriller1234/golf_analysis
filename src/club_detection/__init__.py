@@ -1,10 +1,8 @@
 """
-クラブ検出モジュール
-YOLOv8を使用したゴルフクラブの検出とトラッキング
+クラブ: YOLOv8 Instance Segmentation + マスク幾何
 """
 
-from .club_detector import ClubDetector
-from .club_detector_enhanced import EnhancedClubDetector
+from .club_segmentor import ClubSegmentor
+from .mask_geometry import sample_points_from_mask
 
-__all__ = ["ClubDetector", "EnhancedClubDetector"]
-
+__all__ = ["ClubSegmentor", "sample_points_from_mask"]

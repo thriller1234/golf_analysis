@@ -1,2 +1,1 @@
-# 学習済みモデルをここに配置してください
-
+# Keeps data/models/ in Git; place pose_landmarker_heavy.task and yolov8_club_seg.pt here (.pt/.task are gitignored).

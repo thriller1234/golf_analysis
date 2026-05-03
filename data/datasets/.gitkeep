@@ -1,0 +1,1 @@
+# Keeps data/datasets/ in Git; actual dataset folders are gitignored.

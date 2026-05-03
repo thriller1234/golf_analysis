@@ -1,159 +1,129 @@
 """
-YOLOv8を使用したゴルフクラブ検出モデルの学習スクリプト
+YOLOv8 Instance Segmentation でゴルフクラブを学習し、
+data/models/yolov8_club_seg.pt に best 重みをコピーする。
+
+データセット: ポリゴンラベル付き YOLO segment 形式（train/images, train/labels, data.yaml）。
+
+学習ログ・曲線・weights は既定で output/train/<run_name>/ に保存（旧 Ultralytics 既定の runs/ ではない）。
 """
 
-from ultralytics import YOLO
-from pathlib import Path
-import yaml
+from __future__ import annotations
+
+import argparse
 import shutil
+from pathlib import Path
+
+import yaml
+from ultralytics import YOLO
 
 
-def train_club_detector(
-    dataset_path: str = "data/datasets/golf_club",
-    model_size: str = "n",  # n, s, m, l, x
+def train_club_segmenter(
+    dataset_path: str | Path = "data/datasets/golf_club_seg",
+    model_size: str = "n",
     epochs: int = 100,
     batch_size: int = 16,
     img_size: int = 640,
-    device: int = 0
-):
-    """
-    ゴルフクラブ検出モデルの学習
-    
-    Args:
-        dataset_path: データセットのパス
-        model_size: モデルサイズ（n=軽量, s=小, m=中, l=大, x=超大）
-        epochs: エポック数
-        batch_size: バッチサイズ
-        img_size: 画像サイズ
-        device: GPUデバイスID（0がデフォルト）
-    """
+    device: int | str = 0,
+    project: str = "output/train",
+    run_name: str = "golf_club_seg",
+    *,
+    plots: bool = False,
+) -> Path | None:
     dataset_path = Path(dataset_path)
-    
-    # データセットの存在確認
     if not dataset_path.exists():
         print(f"エラー: データセットが見つかりません: {dataset_path}")
-        print("データセットを準備してください。詳細は docs/yolov8_custom_model_guide.md を参照してください。")
+        print("ポリゴン付き YOLO segment データを準備してください（train/images, train/labels）。")
         return None
-    
-    # データセット設定ファイル（data.yaml）を作成
-    data_yaml = {
-        'path': str(dataset_path.absolute()),
-        'train': 'train/images',
-        'val': 'val/images',
-        'test': 'test/images',
-        'nc': 1,  # クラス数（ゴルフクラブのみ）
-        'names': ['golf_club']
-    }
-    
-    yaml_path = dataset_path / "data.yaml"
-    with open(yaml_path, 'w', encoding='utf-8') as f:
-        yaml.dump(data_yaml, f, allow_unicode=True)
-    
-    print(f"データセット設定ファイルを作成しました: {yaml_path}")
-    
-    # モデルの初期化
-    model_name = f'yolov8{model_size}.pt'
-    print(f"モデルを初期化: {model_name}")
-    model = YOLO(model_name)
-    
-    # 学習パラメータ
-    print(f"\n学習を開始します...")
-    print(f"  エポック数: {epochs}")
-    print(f"  バッチサイズ: {batch_size}")
-    print(f"  画像サイズ: {img_size}")
-    print(f"  デバイス: GPU {device}")
-    
+
+    data_yaml_path = dataset_path / "data.yaml"
+    if not data_yaml_path.exists():
+        data_yaml = {
+            "path": str(dataset_path.resolve()),
+            "train": "train/images",
+            "val": "val/images",
+            "nc": 1,
+            "names": ["golf_club"],
+        }
+        with open(data_yaml_path, "w", encoding="utf-8") as f:
+            yaml.dump(data_yaml, f, allow_unicode=True)
+        print(f"data.yaml を作成しました: {data_yaml_path}")
+
+    base = f"yolov8{model_size}-seg.pt"
+    print(f"初期モデル: {base}")
+    model = YOLO(base)
+
+    print("\nセグメンテーション学習を開始します…")
+    print(f"  dataset: {data_yaml_path}")
+    print(f"  epochs={epochs}, batch={batch_size}, imgsz={img_size}, device={device}, plots={plots}")
+    if not plots:
+        print("  （画像・曲線 PNG は最小限。PR 曲線や train/val バッチ画像も出したい場合は --plots）")
+
     try:
-        results = model.train(
-            data=str(yaml_path),
+        model.train(
+            data=str(data_yaml_path),
             epochs=epochs,
             imgsz=img_size,
             batch=batch_size,
             device=device,
             workers=4,
-            project='runs/detect',
-            name='golf_club_detector',
+            project=project,
+            name=run_name,
             exist_ok=True,
             pretrained=True,
-            optimizer='AdamW',
-            lr0=0.001,
-            lrf=0.01,
-            momentum=0.937,
-            weight_decay=0.0005,
-            warmup_epochs=3,
-            warmup_momentum=0.8,
-            warmup_bias_lr=0.1,
-            box=7.5,
-            cls=0.5,
-            dfl=1.5,
-            label_smoothing=0.0,
-            nbs=64,
-            hsv_h=0.015,
-            hsv_s=0.7,
-            hsv_v=0.4,
-            degrees=0.0,
-            translate=0.1,
-            scale=0.5,
-            shear=0.0,
-            perspective=0.0,
-            flipud=0.0,
-            fliplr=0.5,
-            mosaic=1.0,
-            mixup=0.0,
-            copy_paste=0.0
+            optimizer="AdamW",
+            plots=plots,
         )
-        
-        # 最良のモデルを保存
-        best_model_path = Path('runs/detect/golf_club_detector/weights/best.pt')
-        target_path = Path('data/models/golf_club_detector.pt')
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        if best_model_path.exists():
-            shutil.copy(best_model_path, target_path)
-            print(f"\n✅ モデルを保存しました: {target_path}")
-        else:
-            print(f"\n⚠️ 警告: 最良のモデルが見つかりませんでした: {best_model_path}")
-        
-        # 学習結果のサマリーを表示
-        print("\n学習結果:")
-        print(f"  mAP50: {results.results_dict.get('metrics/mAP50(B)', 'N/A')}")
-        print(f"  Precision: {results.results_dict.get('metrics/precision(B)', 'N/A')}")
-        print(f"  Recall: {results.results_dict.get('metrics/recall(B)', 'N/A')}")
-        
-        return results
-        
-    except Exception as e:
-        print(f"\n❌ エラーが発生しました: {e}")
-        import traceback
-        traceback.print_exc()
+
+        best_src = Path(project) / run_name / "weights" / "best.pt"
+        target = Path("data/models/yolov8_club_seg.pt")
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if best_src.exists():
+            shutil.copy(best_src, target)
+            print(f"\n✅ モデルをコピーしました: {target.resolve()}")
+            return target
+        print(f"\n⚠️ best.pt が見つかりません: {best_src}")
         return None
+    except Exception as e:
+        print(f"\n❌ エラー: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='YOLOv8ゴルフクラブ検出モデルの学習')
-    parser.add_argument('--dataset', type=str, default='data/datasets/golf_club',
-                       help='データセットのパス')
-    parser.add_argument('--model', type=str, default='n', choices=['n', 's', 'm', 'l', 'x'],
-                       help='モデルサイズ (n=軽量, s=小, m=中, l=大, x=超大)')
-    parser.add_argument('--epochs', type=int, default=100,
-                       help='エポック数')
-    parser.add_argument('--batch', type=int, default=16,
-                       help='バッチサイズ')
-    parser.add_argument('--img-size', type=int, default=640,
-                       help='画像サイズ')
-    parser.add_argument('--device', type=int, default=0,
-                       help='GPUデバイスID')
-    
-    args = parser.parse_args()
-    
-    train_club_detector(
+    p = argparse.ArgumentParser(description="YOLOv8 Segment — ゴルフクラブ")
+    p.add_argument("--dataset", type=str, default="data/datasets/golf_club_seg")
+    p.add_argument("--model", type=str, default="n", choices=["n", "s", "m", "l", "x"])
+    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--batch", type=int, default=16)
+    p.add_argument("--img-size", type=int, default=640)
+    p.add_argument("--device", type=int, default=0)
+    p.add_argument(
+        "--project",
+        type=str,
+        default="output/train",
+        help="Ultralytics の project（学習成果物の親ディレクトリ）",
+    )
+    p.add_argument(
+        "--name",
+        type=str,
+        default="golf_club_seg",
+        help="Ultralytics の run 名（output/train/<name>/ に保存）",
+    )
+    p.add_argument(
+        "--plots",
+        action="store_true",
+        help="PR 曲線・混同行列・train/val バッチ画像などを追加保存（ファイル数が増えます）",
+    )
+    args = p.parse_args()
+
+    train_club_segmenter(
         dataset_path=args.dataset,
         model_size=args.model,
         epochs=args.epochs,
         batch_size=args.batch,
         img_size=args.img_size,
-        device=args.device
+        device=args.device,
+        project=args.project,
+        run_name=args.name,
+        plots=args.plots,
     )
-

@@ -1,17 +1,21 @@
 """
-入力動画に骨格オーバーレイをかけて mp4 を出力する。
+入力動画に骨格＋（任意で）クラブセグのオーバーレイをかけて mp4 を出力する。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from src.pose_estimation import PoseEstimator
 from src.visualization import SwingVisualizer
+from src.visualization.club_overlay import draw_club_overlay
+
+if TYPE_CHECKING:
+    from src.club_detection import ClubSegmentor
 
 
 def _resize_to_height(frame: np.ndarray, target_h: int) -> np.ndarray:
@@ -40,8 +44,10 @@ def render_pose_overlay_video(
     visualizer: SwingVisualizer,
     *,
     label: Optional[str] = None,
+    club_segmentor: Optional["ClubSegmentor"] = None,
+    num_club_samples: int = 8,
 ) -> None:
-    """1本の動画を読み、フレームごとに姿勢を推定して骨格を描画した mp4 を書き出す。"""
+    """1 本の動画: 姿勢推定 +（任意）YOLO クラブセグを重ねて書き出す。"""
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():
         raise ValueError(f"動画を開けません: {input_path}")
@@ -60,11 +66,18 @@ def render_pose_overlay_video(
             if not ret:
                 break
             timestamp_ms = int(round(frame_idx * 1000.0 / fps))
+
+            out = frame.copy()
+            if club_segmentor is not None:
+                mask, cpts = club_segmentor.segment_frame(
+                    frame, num_samples=num_club_samples
+                )
+                out = draw_club_overlay(out, mask, cpts)
+
             kp = estimator.process_frame_video(frame, timestamp_ms=timestamp_ms)
             if kp is not None:
-                out = visualizer.visualize_keypoints(frame, kp)
-            else:
-                out = frame.copy()
+                out = visualizer.visualize_keypoints(out, kp)
+
             if label:
                 cv2.putText(
                     out,
@@ -94,10 +107,11 @@ def render_side_by_side_overlay(
     panel_height: int = 720,
     label_my: str = "myswing",
     label_pro: str = "proswing",
+    club_segmentor: Optional["ClubSegmentor"] = None,
+    num_club_samples: int = 8,
 ) -> None:
     """
-    2本の動画を同じフレーム番号で同期させ、短い方の長さまで横並びで1つの mp4 に出力する。
-    detect_for_video はストリームごとに状態を持つため、左右で PoseEstimator を分ける。
+    2 本の動画を同期させ横並びに。左右それぞれで Pose +（共有）ClubSegmentor を適用。
     """
     cap_my = cv2.VideoCapture(str(my_path))
     cap_pro = cv2.VideoCapture(str(pro_path))
@@ -121,19 +135,26 @@ def render_side_by_side_overlay(
                 break
 
             timestamp_ms = int(round(idx * 1000.0 / fps))
+
+            om = frame_my.copy()
+            op_ = frame_pro.copy()
+            if club_segmentor is not None:
+                mm, cm = club_segmentor.segment_frame(
+                    frame_my, num_samples=num_club_samples
+                )
+                om = draw_club_overlay(om, mm, cm)
+                pm, cp = club_segmentor.segment_frame(
+                    frame_pro, num_samples=num_club_samples
+                )
+                op_ = draw_club_overlay(op_, pm, cp)
+
             km = estimator_my.process_frame_video(frame_my, timestamp_ms=timestamp_ms)
             kp = estimator_pro.process_frame_video(frame_pro, timestamp_ms=timestamp_ms)
 
-            om = (
-                visualizer.visualize_keypoints(frame_my, km)
-                if km is not None
-                else frame_my.copy()
-            )
-            op_ = (
-                visualizer.visualize_keypoints(frame_pro, kp)
-                if kp is not None
-                else frame_pro.copy()
-            )
+            if km is not None:
+                om = visualizer.visualize_keypoints(om, km)
+            if kp is not None:
+                op_ = visualizer.visualize_keypoints(op_, kp)
 
             cv2.putText(
                 om,

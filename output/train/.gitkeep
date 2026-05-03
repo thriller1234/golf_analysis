@@ -1,0 +1,1 @@
+# Keeps output/train/ in Git; YOLO training runs under this folder are gitignored.

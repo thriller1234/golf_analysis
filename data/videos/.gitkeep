@@ -1,2 +1,1 @@
-# 動画ファイルをここに配置してください
-
+# Keeps data/videos/ in Git; input videos (*.mp4 etc.) are gitignored.

@@ -1,119 +1,95 @@
-# ゴルフスイング解析アプリ
+# Golf swing analysis
 
-後方から撮影したスイング動画に **MediaPipe Pose（heavy）** の骨格オーバーレイを付与し、`output` に mp4 として書き出すツールです。比較指定時は左右横並びの1ファイルを出力します。
+<p align="center">
+  <img src="media/readme/golf_analysis-logo-thumbnail.png" alt="Golf swing analysis logo" width="100%"/>
+</p>
 
-## プロジェクト概要
+Overlays **MediaPipe Pose Landmarker (heavy)** and an optional **YOLOv8 instance-segmentation** model for the golf club on rear-view swing videos. Writes an MP4 to `output/videos/`.
 
-### 主な機能
+---
 
-- **骨格推定**: MediaPipe **Pose Landmarker heavy** + 動画用 `detect_for_video`（TFLite **GPU デリゲート**を優先、不可なら CPU）
-- **出力**: 入力動画に骨格を重ねた mp4 を `output/` に保存。`--proswing` 指定時は myswing / proswing を横並びにした1本の mp4
-- **クラブ位置**: 現状は未実装（将来 YOLOv8 等を検証する場合は `src/club_detection/` を参照）
+## Features
 
-## 環境要件
+- **Pose**: MediaPipe Pose Landmarker (TFLite), video mode with tracking; GPU delegate when available.
+- **Club** (optional): YOLOv8-seg mask, polyline along the club axis (`--club-samples`, default 8).
+- **Offline-first**: By default only files under `data/models/` are used; see below.
 
-- **OS**: Windows 11
-- **GPU**: GeForce RTX 4090 Laptop 16GB（MediaPipe は TensorFlow Lite GPU デリゲート利用可。環境により CPU フォールバック）
-- **CUDA**: 12.8
-- **Python**: 3.13.3
+## Requirements
 
-## セットアップ
+- Python **3.10+** (tested on 3.13)
+- Dependencies: see [`requirements.txt`](./requirements.txt)
+- **PyTorch**: install the build that matches your platform ([PyTorch install](https://pytorch.org/)). CUDA optional but recommended for YOLO inference.
 
-### 1. リポジトリのクローン
+## Installation
 
 ```bash
-git clone <repository-url>
-cd golf_analysis
-```
-
-### 2. 仮想環境の作成（推奨）
-
-```powershell
 python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
+# Windows: venv\Scripts\activate
+# Unix:    source venv/bin/activate
 
-### 3. 依存関係のインストール
-
-```powershell
 pip install -r requirements.txt
 ```
 
-**注意**: PyTorchのCUDA 12.8対応版をインストールする場合、[PyTorch公式サイト](https://pytorch.org/)から適切なコマンドを確認してください。
+## Usage
 
-例：
-```powershell
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+Paths are relative to the **repository root**, or absolute.
+
+```bash
+# Pose + club (expects data/models/yolov8_club_seg.pt and pose_landmarker_heavy.task)
+python scripts/main.py --myswing data/videos/your_swing.mp4
+
+# Pose only (no club weights needed)
+python scripts/main.py --myswing data/videos/your_swing.mp4 --no-club
+
+# Side-by-side comparison
+python scripts/main.py --myswing data/videos/you.mp4 --proswing data/videos/reference.mp4
+
+# Custom club weights
+python scripts/main.py --myswing data/videos/you.mp4 --club-model path/to/weights.pt
 ```
 
-### 4. 動作確認
+Outputs:
 
-```powershell
-python -m pytest tests/
+- `output/videos/<stem>_swing_overlay.mp4`
+- With `--proswing`: `output/videos/compare_<left>_vs_<right>_swing_overlay.mp4`
+
+### Offline mode (`--off-line-only`, **default: on**)
+
+By default the script **does not download** missing models. Put assets under `data/models/`:
+
+| File | Role |
+|------|------|
+| `pose_landmarker_heavy.task` | MediaPipe pose |
+| `yolov8_club_seg.pt` | Club segmentation (fine-tuned; see training below) |
+
+To **allow downloading** missing files when needed (pose `.task` from Google; if the **default** club path is missing, a **pretrained** `yolov8n-seg.pt` is fetched — not your fine-tuned club model):
+
+```bash
+python scripts/main.py --myswing data/videos/your_swing.mp4 --no-off-line-only
 ```
 
-## プロジェクト構造
+For a **custom** `--club-model` path that does not exist, the tool exits with an error even with `--no-off-line-only` (place the file manually).
+
+## Training your own club model (optional)
+
+1. Prepare frames and segment labels: `python scripts/club_dataset.py` (see script help).
+2. Train: `python scripts/train_yolov8_club.py --dataset data/datasets/golf_club_seg`
+3. Copy or symlink the produced weights to `data/models/yolov8_club_seg.pt` (the training script can copy `best.pt` there depending on configuration).
+
+Training artifacts go under `output/train/<run_name>/` by default. Use `--plots` on the training script if you want extra PNG diagnostics.
+
+## Repository layout (short)
 
 ```
-golf_analysis/
-├── scripts/
-│   └── main.py            # CLI（骨格オーバーレイ動画の生成）
-├── src/
-│   ├── pose_estimation/   # MediaPipe Pose Landmarker
-│   ├── video_render.py    # オーバーレイ・横並び書き出し
-│   ├── club_detection/    # クラブ検出モジュール（現状 main パイプライン未接続）
-│   └── visualization/     # 骨格の OpenCV 描画
-├── data/
-│   ├── videos/
-│   └── models/            # pose_landmarker_heavy.task（初回自動ダウンロード）
-├── output/                # 生成 mp4
-├── docs/
-├── requirements.txt
-└── README.md
+scripts/main.py          # CLI entry
+scripts/club_dataset.py  # dataset extract / annotate / verify
+scripts/train_yolov8_club.py
+src/                     # pose, club detection, rendering
+data/models/             # local weights (gitignored binaries)
+data/videos/             # input videos (typically gitignored)
+output/videos/           # rendered MP4s
 ```
 
-## 使用方法
+## License
 
-パスは **プロジェクトルートからの相対パス**、または **絶対パス**で指定します。
-
-```powershell
-# プロジェクトルートで実行（1本の動画 → output\<名前>_pose_overlay.mp4）
-python scripts/main.py --myswing data/videos/my_swing.mp4
-
-# 横並び比較 → output/compare_<左>_vs_<右>.mp4
-python scripts/main.py --myswing data/videos/my_swing.mp4 --proswing data/videos/matsuyama_driver_1.mp4
-```
-
-初回実行時、`data/models/pose_landmarker_heavy.task` が無ければ自動ダウンロードします。
-
-## 開発メモ（現状の焦点）
-
-- MediaPipe Pose heavy + 動画オーバーレイ出力（`scripts/main.py`）
-- クラブを動画に重ねる場合は `src/club_detection/` と `scripts/train_yolov8_club.py` をパイプラインに接続する必要あり（未接続）
-
-## 注意事項
-
-### 動画の要件
-
-- **フレームレート**: 120fps以上を推奨（最低60fps）
-- **解像度**: 1080p以上を推奨
-- **撮影角度**: 後方（Down-the-Line）から撮影
-
-### 精度について
-
-このアプリケーションは以下の用途に適しています：
-- ✅ フォーム改善・自己解析
-- ✅ プロとの差分可視化
-- ✅ スイング改善に十分な精度
-
-以下の用途には適していません：
-- ❌ トラックマン代替
-- ❌ PGA計測機級の精度
-
-## ライセンス
-
-このプロジェクトはMITライセンスの下で提供されています。詳細は[LICENSE](./LICENSE)ファイルをご覧ください。
-
-## 貢献
-
-プルリクエストやイシューの報告を歓迎します。
+[MIT](./LICENSE)

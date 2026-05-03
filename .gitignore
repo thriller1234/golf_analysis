@@ -37,16 +37,42 @@ env/
 .ipynb_checkpoints
 
 # データファイル（大きなファイル）
+# data/datasets 直下はすべて除外（ディレクトリは data/datasets/.gitkeep のみ追跡）
+data/datasets/*
+!data/datasets/.gitkeep
+
+# プロジェクトルートに Ultralytics 等が落とすことがある重み（コミットしない）
+/*.pt
+/*.pth
+/*.onnx
+/*.task
+/*.tflite
+/*.engine
+/*.safetensors
+/*.h5
+/*.pb
+/*.mlmodel
+/*.weights
+
+# data/models 直下はすべて除外（ディレクトリは data/models/.gitkeep のみ追跡）
+data/models/*
+!data/models/.gitkeep
+
 data/videos/*.mp4
 data/videos/*.avi
 data/videos/*.mov
-data/models/*.pt
-data/models/*.pth
-data/models/*.onnx
 
-# 出力ファイル
-output/
+# 出力（リポジトリには動画・学習ログを含めない）
+output/videos/*.mp4
+output/videos/*.avi
+output/videos/*.mov
+# output/train 直下はすべて除外（output/train/.gitkeep のみ追跡）
+output/train/*
+!output/train/.gitkeep
+runs/
+
 *.png
+!media/readme/golf_analysis-logo-thumbnail.png
 *.jpg
 *.jpeg
 *.gif
