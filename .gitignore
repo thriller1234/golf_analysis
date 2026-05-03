@@ -57,6 +57,8 @@ data/datasets/*
 # data/models 直下はすべて除外（ディレクトリは data/models/.gitkeep のみ追跡）
 data/models/*
 !data/models/.gitkeep
+# club認識のためのfinetunedモデル 例外的に除外
+!data/models/yolov8_club_seg.pt
 
 data/videos/*.mp4
 data/videos/*.avi

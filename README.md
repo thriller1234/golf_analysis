@@ -62,7 +62,7 @@ By default the script **does not download** missing models. Put assets under `da
 | `pose_landmarker_heavy.task` | MediaPipe pose |
 | `yolov8_club_seg.pt` | Club segmentation (fine-tuned; see training below) |
 
-To **allow downloading** missing files when needed (pose `.task` from Google; if the **default** club path is missing, a **pretrained** `yolov8n-seg.pt` is fetched — not your fine-tuned club model):
+To **allow downloading** missing files when needed (pose `.task` from Google). **`data/models/yolov8_club_seg.pt` is bundled with this repository**; if that default club file is still missing, a **pretrained** `yolov8n-seg.pt` is fetched instead — not your fine-tuned weights.
 
 ```bash
 python scripts/main.py --myswing data/videos/your_swing.mp4 --no-off-line-only
