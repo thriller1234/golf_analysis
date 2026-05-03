@@ -65,7 +65,7 @@ By default the script **does not download** missing models. Put assets under `da
 To **allow downloading** missing files when needed (pose `.task` from Google). **`data/models/yolov8_club_seg.pt` is bundled with this repository**; if that default club file is still missing, a **pretrained** `yolov8n-seg.pt` is fetched instead — not your fine-tuned weights.
 
 ```bash
-python scripts/main.py --myswing data/videos/your_swing.mp4 --no-off-line-only
+python scripts/main.py --myswing data/videos/you.mp4 --proswing data/videos/ref.mp4 --off-line-only False
 ```
 
 For a **custom** `--club-model` path that does not exist, the tool exits with an error even with `--no-off-line-only` (place the file manually).

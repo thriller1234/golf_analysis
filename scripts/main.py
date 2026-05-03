@@ -4,8 +4,8 @@
 使用例（プロジェクトルートで）:
   python scripts/main.py --myswing data/videos/my_swing.mp4
   python scripts/main.py --myswing data/videos/my_swing.mp4 --proswing data/videos/pro.mp4
-  python scripts/main.py --myswing data/videos/my.mp4 --no-club   # 姿勢のみ（モデル不要）
-  python scripts/main.py --myswing data/videos/my.mp4 --no-off-line-only  # 不足時のみネット取得
+  python scripts/main.py --myswing data/videos/my.mp4 --no-club   # 姿勢のみ（クラブ .pt 不要）
+  python scripts/main.py --myswing data/videos/my.mp4 --off-line-only False  # 不足時のみネット取得
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from src.visualization import SwingVisualizer
 
 
 DEFAULT_CLUB_MODEL = Path("data/models/yolov8_club_seg.pt")
+DEFAULT_POSE_MODEL = Path("data/models/pose_landmarker_heavy.task")
 # Ultralytics release asset (pretrained seg; not club-finetuned — see README)
 _YOLOV8N_SEG_PT_URL = (
     "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n-seg.pt"
@@ -35,6 +36,17 @@ _YOLOV8N_SEG_PT_URL = (
 
 def _project_root() -> Path:
     return _ROOT
+
+
+def _parse_bool(s: str) -> bool:
+    sl = str(s).strip().lower()
+    if sl in ("true", "1", "yes"):
+        return True
+    if sl in ("false", "0", "no"):
+        return False
+    raise argparse.ArgumentTypeError(
+        f"真偽値は True または False で指定してください（得られた値: {s!r}）"
+    )
 
 
 def _resolve_path(project_root: Path, rel_or_abs: str) -> Path:
@@ -55,6 +67,21 @@ def _download_file(url: str, dest: Path) -> None:
     print(f"保存しました: {dest}", file=sys.stderr)
 
 
+def _resolve_pose_model(root: Path, pose_model_arg: str, offline_only: bool) -> Path:
+    path = _resolve_path(root, pose_model_arg)
+    if path.is_file():
+        return path
+    if offline_only:
+        print(
+            f"エラー: Pose 用 .task がありません（オフラインモード）: {path}\n"
+            "  data/models に pose_landmarker_heavy.task を置くか、"
+            " --off-line-only False で自動ダウンロードを許可してください。",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return path
+
+
 def _resolve_club_model(
     root: Path,
     club_model_arg: str,
@@ -69,7 +96,7 @@ def _resolve_club_model(
         print(
             f"エラー: クラブ用モデルがありません（オフラインモード）: {path}\n"
             "  data/models に配置するか、学習して data/models/yolov8_club_seg.pt を用意してください。\n"
-            "  ネットから不足分のみ取得する場合は --no-off-line-only を指定します（事前学習重みのみ自動取得可）。\n"
+            "  ネットから不足分のみ取得する場合は --off-line-only False を指定します（事前学習重みのみ自動取得可）。\n"
             "  骨格のみなら --no-club を使います。",
             file=sys.stderr,
         )
@@ -100,9 +127,9 @@ def _resolve_club_model(
     raise SystemExit(1)
 
 
-def _pose_estimator(offline_only: bool) -> PoseEstimator:
+def _pose_estimator(offline_only: bool, pose_model: Path) -> PoseEstimator:
     try:
-        return PoseEstimator(offline_only=offline_only)
+        return PoseEstimator(offline_only=offline_only, model_path=pose_model)
     except FileNotFoundError as e:
         print(e, file=sys.stderr)
         raise SystemExit(1) from e
@@ -114,20 +141,30 @@ def main() -> int:
     )
     parser.add_argument(
         "--myswing",
+        metavar="MYVIDEO",
         type=str,
         required=True,
         help="プロジェクトルートからの相対パス、または絶対パス（自分のスイング動画）",
     )
     parser.add_argument(
         "--proswing",
+        metavar="PROVIDEO",
         type=str,
         default=None,
         help="比較用プロの動画（任意）",
     )
     parser.add_argument(
+        "--pose-model",
+        type=str,
+        default=str(DEFAULT_POSE_MODEL),
+        metavar="POSE_MODEL",
+        help=f"MediaPipe Pose Landmarker の .task（既定: {DEFAULT_POSE_MODEL}）",
+    )
+    parser.add_argument(
         "--club-model",
         type=str,
         default=str(DEFAULT_CLUB_MODEL),
+        metavar="CLUB_MODEL",
         help=f"学習済み YOLOv8 Segment の .pt（既定: {DEFAULT_CLUB_MODEL}）",
     )
     parser.add_argument(
@@ -136,19 +173,14 @@ def main() -> int:
         help="クラブ推論を行わず骨格のみ出力する（クラブ用 .pt 不要）",
     )
     parser.add_argument(
-        "--club-samples",
-        type=int,
-        default=8,
-        help="クラブマスク主軸に沿ったサンプル点数（既定: 8）",
-    )
-    parser.add_argument(
         "--off-line-only",
         dest="offline_only",
+        type=_parse_bool,
         default=True,
-        action=argparse.BooleanOptionalAction,
+        metavar="BOOL",
         help=(
-            "既定: data/models のみ使用（不足時はエラー）。"
-            " --no-off-line-only で Pose の .task / 既定クラブ .pt 不足時にネットから取得を試みます。"
+            "True: data/models のみ使用（不足時はエラー）。"
+            " False: Pose の .task / 既定クラブ .pt 不足時にネットから取得を試みます。"
         ),
     )
 
@@ -159,6 +191,8 @@ def main() -> int:
     if not my_path.exists():
         print(f"エラー: 動画が見つかりません: {my_path}", file=sys.stderr)
         return 1
+
+    pose_model_path = _resolve_pose_model(root, args.pose_model, args.offline_only)
 
     out_dir = root / "output" / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -179,11 +213,11 @@ def main() -> int:
 
         my_stem = _safe_filename_segment(my_path.stem)
         pro_stem = _safe_filename_segment(pro_path.stem)
-        output_path = out_dir / f"compare_{my_stem}_vs_{pro_stem}_swing_overlay.mp4"
+        output_path = out_dir / f"{my_stem}_vs_{pro_stem}_analysis.mp4"
 
         print("Pose Landmarker heavy + クラブ（指定時）で左右それぞれ処理します…")
-        est_my = _pose_estimator(args.offline_only)
-        est_pro = _pose_estimator(args.offline_only)
+        est_my = _pose_estimator(args.offline_only, pose_model_path)
+        est_pro = _pose_estimator(args.offline_only, pose_model_path)
         try:
             render_side_by_side_overlay(
                 my_path,
@@ -195,7 +229,6 @@ def main() -> int:
                 label_my="myswing",
                 label_pro="proswing",
                 club_segmentor=club_seg,
-                num_club_samples=args.club_samples,
             )
         finally:
             est_my.close()
@@ -204,10 +237,10 @@ def main() -> int:
         print(f"出力しました: {output_path}")
         return 0
 
-    output_path = out_dir / f"{_safe_filename_segment(my_path.stem)}_swing_overlay.mp4"
+    output_path = out_dir / f"{_safe_filename_segment(my_path.stem)}_analysis.mp4"
 
     print("Pose Landmarker heavy + クラブ（指定時）で処理します…")
-    estimator = _pose_estimator(args.offline_only)
+    estimator = _pose_estimator(args.offline_only, pose_model_path)
     try:
         render_pose_overlay_video(
             my_path,
@@ -216,7 +249,6 @@ def main() -> int:
             visualizer,
             label=None,
             club_segmentor=club_seg,
-            num_club_samples=args.club_samples,
         )
     finally:
         estimator.close()

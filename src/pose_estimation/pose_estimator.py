@@ -72,7 +72,7 @@ class PoseEstimator:
                 raise FileNotFoundError(
                     f"Pose Landmarker の .task がありません（オフラインモード）: {self._model_path}\n"
                     "  data/models に pose_landmarker_heavy.task を置くか、"
-                    " --no-off-line-only で自動ダウンロードを許可してください。"
+                    " --off-line-only False で自動ダウンロードを許可してください。"
                 )
             self._download_model(self._model_path, _POSE_MODEL_HEAVY_URL)
 

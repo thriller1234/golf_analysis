@@ -1,5 +1,7 @@
 """
 入力動画に骨格＋（任意で）クラブセグのオーバーレイをかけて mp4 を出力する。
+
+出力の実時間は常に OUTPUT_DURATION_SEC 秒。入力の全フレームを使い、再生速度を調整する。
 """
 
 from __future__ import annotations
@@ -16,6 +18,12 @@ from src.visualization.club_overlay import draw_club_overlay
 
 if TYPE_CHECKING:
     from src.club_detection import ClubSegmentor
+
+# クラブマスク主軸上のサンプル点数（CLI では指定しない）
+_CLUB_MASK_SAMPLES = 8
+
+# 書き出し動画の長さ（秒）。元動画の全フレームをこの長さに収める
+OUTPUT_DURATION_SEC = 10.0
 
 
 def _resize_to_height(frame: np.ndarray, target_h: int) -> np.ndarray:
@@ -37,6 +45,38 @@ def _open_writer(path: Path, fps: float, size: Tuple[int, int]) -> cv2.VideoWrit
     return writer
 
 
+def _count_frames_by_scan(path: Path) -> int:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise ValueError(f"動画を開けません: {path}")
+    n = 0
+    try:
+        while True:
+            ret, _ = cap.read()
+            if not ret:
+                break
+            n += 1
+    finally:
+        cap.release()
+    return n
+
+
+def _read_all_frames(path: Path) -> list[np.ndarray]:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        raise ValueError(f"動画を開けません: {path}")
+    frames: list[np.ndarray] = []
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+    finally:
+        cap.release()
+    return frames
+
+
 def render_pose_overlay_video(
     input_path: Path,
     output_path: Path,
@@ -45,19 +85,22 @@ def render_pose_overlay_video(
     *,
     label: Optional[str] = None,
     club_segmentor: Optional["ClubSegmentor"] = None,
-    num_club_samples: int = 8,
 ) -> None:
-    """1 本の動画: 姿勢推定 +（任意）YOLO クラブセグを重ねて書き出す。"""
+    """1 本の動画: 姿勢推定 +（任意）YOLO クラブセグ。全フレームを使い OUTPUT_DURATION_SEC 秒に伸縮して書き出す。"""
+    n_frames = _count_frames_by_scan(input_path)
+    if n_frames == 0:
+        raise ValueError(f"読み込めるフレームがありません: {input_path}")
+
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():
         raise ValueError(f"動画を開けません: {input_path}")
 
-    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    out_fps = n_frames / OUTPUT_DURATION_SEC
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     size = (width, height)
 
-    writer = _open_writer(output_path, fps, size)
+    writer = _open_writer(output_path, out_fps, size)
     frame_idx = 0
 
     try:
@@ -65,12 +108,12 @@ def render_pose_overlay_video(
             ret, frame = cap.read()
             if not ret:
                 break
-            timestamp_ms = int(round(frame_idx * 1000.0 / fps))
+            timestamp_ms = int(round(frame_idx * 1000.0 * OUTPUT_DURATION_SEC / n_frames))
 
             out = frame.copy()
             if club_segmentor is not None:
                 mask, cpts = club_segmentor.segment_frame(
-                    frame, num_samples=num_club_samples
+                    frame, num_samples=_CLUB_MASK_SAMPLES
                 )
                 out = draw_club_overlay(out, mask, cpts)
 
@@ -108,43 +151,40 @@ def render_side_by_side_overlay(
     label_my: str = "myswing",
     label_pro: str = "proswing",
     club_segmentor: Optional["ClubSegmentor"] = None,
-    num_club_samples: int = 8,
 ) -> None:
     """
-    2 本の動画を同期させ横並びに。左右それぞれで Pose +（共有）ClubSegmentor を適用。
+    2 本の動画を横並びに。各動画の全フレームを使い、それぞれ OUTPUT_DURATION_SEC 秒に伸縮して同期して書き出す。
     """
-    cap_my = cv2.VideoCapture(str(my_path))
-    cap_pro = cv2.VideoCapture(str(pro_path))
-    if not cap_my.isOpened():
-        raise ValueError(f"動画を開けません: {my_path}")
-    if not cap_pro.isOpened():
-        raise ValueError(f"動画を開けません: {pro_path}")
+    frames_my = _read_all_frames(my_path)
+    frames_pro = _read_all_frames(pro_path)
+    n1 = len(frames_my)
+    n2 = len(frames_pro)
+    if n1 == 0 or n2 == 0:
+        raise ValueError("比較動画を書き出せませんでした（読み込めるフレームがありません）。")
 
-    fps_my = float(cap_my.get(cv2.CAP_PROP_FPS) or 30.0)
-    fps_pro = float(cap_pro.get(cv2.CAP_PROP_FPS) or 30.0)
-    fps = min(fps_my, fps_pro)
+    f_out = max(n1, n2)
+    out_fps = f_out / OUTPUT_DURATION_SEC
 
     writer: Optional[cv2.VideoWriter] = None
-    idx = 0
 
     try:
-        while True:
-            ret_a, frame_my = cap_my.read()
-            ret_b, frame_pro = cap_pro.read()
-            if not ret_a or not ret_b:
-                break
+        for j in range(f_out):
+            idx_my = min(j * n1 // f_out, n1 - 1)
+            idx_pro = min(j * n2 // f_out, n2 - 1)
+            frame_my = frames_my[idx_my]
+            frame_pro = frames_pro[idx_pro]
 
-            timestamp_ms = int(round(idx * 1000.0 / fps))
+            timestamp_ms = int(round(j * 1000.0 * OUTPUT_DURATION_SEC / f_out))
 
             om = frame_my.copy()
             op_ = frame_pro.copy()
             if club_segmentor is not None:
                 mm, cm = club_segmentor.segment_frame(
-                    frame_my, num_samples=num_club_samples
+                    frame_my, num_samples=_CLUB_MASK_SAMPLES
                 )
                 om = draw_club_overlay(om, mm, cm)
                 pm, cp = club_segmentor.segment_frame(
-                    frame_pro, num_samples=num_club_samples
+                    frame_pro, num_samples=_CLUB_MASK_SAMPLES
                 )
                 op_ = draw_club_overlay(op_, pm, cp)
 
@@ -183,15 +223,12 @@ def render_side_by_side_overlay(
 
             if writer is None:
                 h, w = combined.shape[:2]
-                writer = _open_writer(output_path, fps, (w, h))
+                writer = _open_writer(output_path, out_fps, (w, h))
 
             writer.write(combined)
-            idx += 1
 
         if writer is None:
             raise ValueError("比較動画を書き出せませんでした（読み込めるフレームがありません）。")
     finally:
         if writer is not None:
             writer.release()
-        cap_my.release()
-        cap_pro.release()
