@@ -164,6 +164,43 @@ def _wrist_y_series(
     return _fill_nan_linear(ys, max_gap=24)
 
 
+def _wrist_plus_right_elbow_y_series(
+    keypoints_seq: list[Optional[Dict]],
+    frame_w: int,
+    frame_h: int,
+) -> np.ndarray:
+    ys = np.full((len(keypoints_seq),), np.nan, dtype=np.float32)
+    for i, kp in enumerate(keypoints_seq):
+        if kp is None:
+            continue
+        landmarks = kp.get("landmarks", {})
+        wrist = _hand_center(kp, frame_w, frame_h)
+        relb = _landmark_xy(landmarks, 14, frame_w, frame_h)  # right_elbow
+        if wrist is not None and relb is not None:
+            ys[i] = float((wrist[1] + relb[1]) * 0.5)
+        elif wrist is not None:
+            ys[i] = float(wrist[1])
+        elif relb is not None:
+            ys[i] = float(relb[1])
+    return _fill_nan_linear(ys, max_gap=24)
+
+
+def _right_elbow_y_series(
+    keypoints_seq: list[Optional[Dict]],
+    frame_w: int,
+    frame_h: int,
+) -> np.ndarray:
+    ys = np.full((len(keypoints_seq),), np.nan, dtype=np.float32)
+    for i, kp in enumerate(keypoints_seq):
+        if kp is None:
+            continue
+        landmarks = kp.get("landmarks", {})
+        relb = _landmark_xy(landmarks, 14, frame_w, frame_h)  # right_elbow
+        if relb is not None:
+            ys[i] = float(relb[1])
+    return _fill_nan_linear(ys, max_gap=24)
+
+
 def _estimate_start_from_head_motion(
     head_points: list[Optional[np.ndarray]],
     frame_w: int,
@@ -299,6 +336,33 @@ def _find_macro_transition_midpoint(
     return None
 
 
+def _find_flat_to_down_after_rise(
+    states: np.ndarray,
+    *,
+    start_idx: int,
+) -> Optional[int]:
+    """
+    上昇(-1) -> 停滞(0) -> 下降(+1) のうち、
+    停滞 -> 下降 へ移る瞬間（下降ラン開始）を返す。
+    """
+    runs = _run_segments(states)
+    if not runs:
+        return None
+
+    for i, (s, e, v) in enumerate(runs):
+        if v != -1 or e < start_idx:
+            continue
+        j = i + 1
+        saw_flat = False
+        while j < len(runs) and runs[j][2] == 0:
+            saw_flat = True
+            j += 1
+        if saw_flat and j < len(runs) and runs[j][2] == 1:
+            down_start = runs[j][0]
+            return int(np.clip(down_start + 1, 0, len(states)))
+    return None
+
+
 def interpolate_head_points(
     head_points: list[Optional[np.ndarray]],
     *,
@@ -388,6 +452,20 @@ def estimate_swing_phases(
     y_filled = wrist_y.copy()
     y_filled[np.isnan(y_filled)] = np.nanmean(y_filled)
     y_s = _smooth(y_filled, window=7)
+    wr_elb_y = _wrist_plus_right_elbow_y_series(keypoints_seq, frame_w, frame_h)
+    wr_elb_filled = wr_elb_y.copy()
+    if np.isnan(wr_elb_filled).all():
+        wr_elb_filled = y_filled.copy()
+    else:
+        wr_elb_filled[np.isnan(wr_elb_filled)] = np.nanmean(wr_elb_filled)
+    wr_elb_s = _smooth(wr_elb_filled, window=7)
+    relb_y = _right_elbow_y_series(keypoints_seq, frame_w, frame_h)
+    relb_filled = relb_y.copy()
+    if np.isnan(relb_filled).all():
+        relb_filled = wr_elb_filled.copy()
+    else:
+        relb_filled[np.isnan(relb_filled)] = np.nanmean(relb_filled)
+    relb_s = _smooth(relb_filled, window=7)
 
     # Address -> Backswing は手首ではなくクラブヘッドの動き出しで判定
     start_idx = _estimate_start_from_head_motion(
@@ -398,14 +476,23 @@ def estimate_swing_phases(
     )
 
     macro_states = _macro_motion_states(y_s)
+    macro_states_wrist = _macro_motion_states(y_s)
+    macro_states_elbow = _macro_motion_states(relb_s)
 
-    # Backswing -> Downswing: 上昇(-1) -> 停滞(0) -> 下降(+1) の停滞中間
-    top_idx = _find_macro_transition_midpoint(
-        macro_states,
+    # Backswing -> Downswing:
+    # 手首と右肘がどちらも停滞(0) -> 下降(+1) に移る and 条件を境界とする
+    top_idx_wrist = _find_flat_to_down_after_rise(
+        macro_states_wrist,
         start_idx=start_idx + 1,
-        from_state=-1,
-        to_state=1,
     )
+    top_idx_elbow = _find_flat_to_down_after_rise(
+        macro_states_elbow,
+        start_idx=start_idx + 1,
+    )
+    if top_idx_wrist is not None and top_idx_elbow is not None:
+        top_idx = max(top_idx_wrist, top_idx_elbow)
+    else:
+        top_idx = None
     if top_idx is None:
         top_idx = max(start_idx + 1, int(n * 0.35))
 

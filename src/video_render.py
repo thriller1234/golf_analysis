@@ -165,6 +165,83 @@ def _draw_head_trace(
     return cv2.addWeighted(overlay, 0.55, out, 0.45, 0.0)
 
 
+def _classify_swing_plane(
+    head_points: list[Optional[np.ndarray]],
+    phase_by_frame: list[SwingPhase],
+    frame_w: int,
+    frame_h: int,
+) -> str:
+    """
+    1スイング全体で Backswing と Downswing の軌跡位置関係を評価し、
+    Shallow / Steep / On-plane を返す。
+    """
+    bs: list[np.ndarray] = []
+    ds: list[np.ndarray] = []
+    n = min(len(head_points), len(phase_by_frame))
+    for i in range(n):
+        p = head_points[i]
+        if p is None:
+            continue
+        x, y = float(p[0]), float(p[1])
+        if not (0.0 <= x < frame_w and 0.0 <= y < frame_h):
+            continue
+        ph = phase_by_frame[i]
+        if ph in (SwingPhase.ADDRESS, SwingPhase.BACKSWING):
+            bs.append(np.array([x, y], dtype=np.float32))
+        elif ph == SwingPhase.DOWNSWING:
+            ds.append(np.array([x, y], dtype=np.float32))
+
+    if len(bs) < 5 or len(ds) < 5:
+        return "On-plane"
+
+    # y帯ごとに x を比較して、軌道全体の左右差を集計
+    ys_all = np.array([p[1] for p in bs + ds], dtype=np.float32)
+    y_min, y_max = float(np.min(ys_all)), float(np.max(ys_all))
+    if y_max <= y_min + 1e-3:
+        return "On-plane"
+
+    n_bins = 14
+    bins = np.linspace(y_min, y_max, n_bins + 1)
+    deltas: list[float] = []
+    bs_arr = np.vstack(bs)
+    ds_arr = np.vstack(ds)
+    for bi in range(n_bins):
+        yl, yr = float(bins[bi]), float(bins[bi + 1])
+        in_bs = (bs_arr[:, 1] >= yl) & (bs_arr[:, 1] < yr)
+        in_ds = (ds_arr[:, 1] >= yl) & (ds_arr[:, 1] < yr)
+        if int(np.sum(in_bs)) < 1 or int(np.sum(in_ds)) < 1:
+            continue
+        x_bs = float(np.median(bs_arr[in_bs, 0]))
+        x_ds = float(np.median(ds_arr[in_ds, 0]))
+        deltas.append(x_ds - x_bs)
+
+    if len(deltas) < 3:
+        return "On-plane"
+
+    delta = float(np.median(np.asarray(deltas, dtype=np.float32)))
+    thr = max(8.0, frame_w * 0.03)  # 「大きく」左/右にある場合のみ
+    if delta <= -thr:
+        return "Shallow"
+    if delta >= thr:
+        return "Steep"
+    return "On-plane"
+
+
+def _draw_plane_label(frame: np.ndarray, plane_label: str) -> np.ndarray:
+    out = frame.copy()
+    cv2.putText(
+        out,
+        f"Plane: {plane_label}",
+        (12, 104),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.78,
+        (245, 245, 245),
+        2,
+        cv2.LINE_AA,
+    )
+    return out
+
+
 def render_pose_overlay_video(
     input_path: Path,
     output_path: Path,
@@ -190,6 +267,14 @@ def render_pose_overlay_video(
         club_segmentor,
         total_out_frames=n_frames,
     )
+    plane_label: Optional[str] = None
+    if phase_result is not None and phase_result.phase_by_frame:
+        plane_label = _classify_swing_plane(
+            phase_result.head_points,
+            phase_result.phase_by_frame,
+            width,
+            height,
+        )
 
     writer = _open_writer(output_path, out_fps, size)
     try:
@@ -209,6 +294,11 @@ def render_pose_overlay_video(
                     phase_result.phase_by_frame,
                     frame_idx,
                 )
+                if (
+                    plane_label is not None
+                    and phase_result.phase_by_frame[frame_idx] == SwingPhase.DOWNSWING
+                ):
+                    out = _draw_plane_label(out, plane_label)
                 phase_text = f"Phase: {phase_result.phase_by_frame[frame_idx].value}"
                 phase_pos = (12, 72) if label else (12, 36)
                 cv2.putText(
@@ -276,6 +366,14 @@ def render_side_by_side_overlay(
         club_segmentor,
         total_out_frames=f_out,
     )
+    plane_my: Optional[str] = None
+    plane_pro: Optional[str] = None
+    if phase_my is not None and phase_my.phase_by_frame:
+        h1, w1 = frames_my[0].shape[:2]
+        plane_my = _classify_swing_plane(phase_my.head_points, phase_my.phase_by_frame, w1, h1)
+    if phase_pro is not None and phase_pro.phase_by_frame:
+        h2, w2 = frames_pro[0].shape[:2]
+        plane_pro = _classify_swing_plane(phase_pro.head_points, phase_pro.phase_by_frame, w2, h2)
 
     writer: Optional[cv2.VideoWriter] = None
     try:
@@ -301,6 +399,8 @@ def render_side_by_side_overlay(
 
             if phase_my is not None and phase_my.phase_by_frame:
                 om = _draw_head_trace(om, phase_my.head_points, phase_my.phase_by_frame, idx_my)
+                if plane_my is not None and phase_my.phase_by_frame[idx_my] == SwingPhase.DOWNSWING:
+                    om = _draw_plane_label(om, plane_my)
                 cv2.putText(
                     om,
                     f"Phase: {phase_my.phase_by_frame[idx_my].value}",
@@ -313,6 +413,8 @@ def render_side_by_side_overlay(
                 )
             if phase_pro is not None and phase_pro.phase_by_frame:
                 op_ = _draw_head_trace(op_, phase_pro.head_points, phase_pro.phase_by_frame, idx_pro)
+                if plane_pro is not None and phase_pro.phase_by_frame[idx_pro] == SwingPhase.DOWNSWING:
+                    op_ = _draw_plane_label(op_, plane_pro)
                 cv2.putText(
                     op_,
                     f"Phase: {phase_pro.phase_by_frame[idx_pro].value}",
